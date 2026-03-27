@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <title>雷鳴之魂 AI 對戰版</title>
+    <style>
+        body { margin: 0; background: #050505; overflow: hidden; display: flex; justify-content: center; align-items: center; height: 100vh; font-family: 'Arial', sans-serif; }
+        #ui { position: absolute; top: 30px; width: 900px; display: flex; justify-content: space-between; align-items: center; z-index: 10; }
+        .health-box { width: 400px; height: 35px; background: rgba(255,255,255,0.1); border: 3px solid #eee; box-shadow: 0 0 15px rgba(0,0,0,0.5); position: relative; }
+        .health-bar { height: 100%; width: 100%; transition: width 0.1s ease-out; }
+        #p1-hp { background: linear-gradient(90deg, #00d2ff, #3a7bd5); float: right; }
+        #p2-hp { background: linear-gradient(90deg, #f05053, #e1eec3); }
+        .player-name { position: absolute; top: -25px; color: white; font-weight: bold; text-transform: uppercase; letter-spacing: 2px; }
+        canvas { background: #1a1a1a; border-bottom: 10px solid #333; box-shadow: 0 0 100px rgba(0,0,0,0.8); }
+    </style>
+</head>
+<body>
+
+<div id="ui">
+    <div class="health-box">
+        <span class="player-name" style="right:0">Player 1</span>
+        <div id="p1-hp" class="health-bar"></div>
+    </div>
+    <div style="color: gold; font-size: 30px; font-style: italic; font-weight: bold;">VS</div>
+    <div class="health-box">
+        <span class="player-name">Enemy AI</span>
+        <div id="p2-hp" class="health-bar"></div>
+    </div>
+</div>
+
+<canvas id="game"></canvas>
+
+<script>
+const canvas = document.getElementById('game');
+const ctx = canvas.getContext('2d');
+canvas.width = 1024;
+canvas.height = 576;
+
+const gravity = 0.8;
+let shakeTime = 0;
+
+class Fighter {
+    constructor({ pos, color, offset, isAI }) {
+        this.pos = pos;
+        this.vel = { x: 0, y: 0 };
+        this.width = 60;
+        this.height = 150;
+        this.color = color;
+        this.hp = 100;
+        this.isAttacking = false;
+        this.isAI = isAI;
+        this.attackBox = { pos: { x: pos.x, y: pos.y }, offset, width: 120, height: 50 };
+        this.facing = isAI ? -1 : 1;
+    }
+
+    draw() {
+        // 繪製角色
+        ctx.save();
+        if (shakeTime > 0) {
+            ctx.translate(Math.random()*5, Math.random()*5);
+            shakeTime--;
+        }
+        
+        // 漸層色主體
+        let grd = ctx.createLinearGradient(this.pos.x, this.pos.y, this.pos.x, this.pos.y + this.height);
+        grd.addColorStop(0, this.color);
+        grd.addColorStop(1, "#000");
+        ctx.fillStyle = grd;
+        ctx.fillRect(this.pos.x, this.pos.y, this.width, this.height);
+
+        // 眼睛（增加精緻感）
+        ctx.fillStyle = "white";
+        let eyeX = this.facing === 1 ? this.pos.x + 40 : this.pos.x + 10;
+        ctx.fillRect(eyeX, this.pos.y + 20, 10, 5);
+
+        if (this.isAttacking) {
+            ctx.fillStyle = "rgba(255,255,255,0.4)";
+            ctx.fillRect(this.attackBox.pos.x, this.attackBox.pos.y, this.attackBox.width, this.attackBox.height);
+        }
+        ctx.restore();
+    }
+
+    update() {
+        this.draw();
+        this.attackBox.pos.x = this.pos.x + this.attackBox.offset.x;
+        this.attackBox.pos.y = this.pos.y + 30;
+
+        this.pos.x += this.vel.x;
+        this.pos.y += this.vel.y;
+
+        if (this.pos.y + this.height + this.vel.y >= 540) {
+            this.vel.y = 0;
+            this.pos.y = 390;
+        } else {
+            this.vel.y += gravity;
+        }
+        
+        // 邊界限制
+        if (this.pos.x < 0) this.pos.x = 0;
+        if (this.pos.x > canvas.width - this.width) this.pos.x = canvas.width - this.width;
+    }
+
+    attack() {
+        this.isAttacking = true;
+        setTimeout(() => this.isAttacking = false, 150);
+    }
+}
+
+const p1 = new Fighter({ pos: {x: 150, y: 0}, color: "#00d2ff", offset: {x: 0, y: 0}, isAI: false });
+const ai = new Fighter({ pos: {x: 800, y: 0}, color: "#ff3e3e", offset: {x: -60, y: 0}, isAI: true });
+
+const keys = { a: false, d: false, w: false };
+
+// AI 邏輯控制
+function updateAI() {
+    const dist = p1.pos.x - ai.pos.x;
+    
+    // 判斷面向
+    ai.facing = dist > 0 ? 1 : -1;
+    ai.attackBox.offset.x = ai.facing === 1 ? 0 : -60;
+
+    // AI 行為決策
+    if (Math.abs(dist) > 100) {
+        ai.vel.x = dist > 0 ? 3 : -3; // 追蹤玩家
+    } else {
+        ai.vel.x = 0;
+        if (Math.random() < 0.05) ai.attack(); // 隨機攻擊
+    }
+
+    // AI 隨機跳躍
+    if (Math.random() < 0.01 && ai.pos.y >= 390) ai.vel.y = -15;
+}
+
+function checkHit(atk, vic, barId) {
+    if (atk.isAttacking && 
+        atk.attackBox.pos.x < vic.pos.x + vic.width &&
+        atk.attackBox.pos.x + atk.attackBox.width > vic.pos.x &&
+        atk.attackBox.pos.y < vic.pos.y + vic.height &&
+        atk.attackBox.pos.y + atk.attackBox.height > vic.pos.y) {
+        
+        vic.hp -= 2;
+        shakeTime = 5;
+        document.getElementById(barId).style.width = vic.hp + "%";
+        atk.isAttacking = false;
+    }
+}
+
+function engine() {
+    ctx.fillStyle = "#1a1a1a";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    
+    // 背景地圖裝飾
+    ctx.strokeStyle = "#333";
+    for(let i=0; i<canvas.width; i+=50) {
+        ctx.beginPath(); ctx.moveTo(i, 540); ctx.lineTo(i, 576); ctx.stroke();
+    }
+
+    p1.update();
+    ai.update();
+    updateAI();
+
+    p1.vel.x = 0;
+    if (keys.a) { p1.vel.x = -5; p1.facing = -1; p1.attackBox.offset.x = -60; }
+    if (keys.d) { p1.vel.x = 5; p1.facing = 1; p1.attackBox.offset.x = 0; }
+
+    checkHit(p1, ai, 'p2-hp');
+    checkHit(ai, p1, 'p1-hp');
+
+    if (p1.hp <= 0 || ai.hp <= 0) {
+        ctx.fillStyle = "white";
+        ctx.font = "50px Arial";
+        ctx.fillText("GAME OVER", 380, 280);
+        return;
+    }
+
+    requestAnimationFrame(engine);
+}
+
+window.addEventListener('keydown', (e) => {
+    if (e.key === 'a') keys.a = true;
+    if (e.key === 'd') keys.d = true;
+    if (e.key === 'w' && p1.pos.y >= 390) p1.vel.y = -18;
+    if (e.key === 'j') p1.attack();
+});
+window.addEventListener('keyup', (e) => {
+    if (e.key === 'a') keys.a = false;
+    if (e.key === 'd') keys.d = false;
+});
+
+engine();
+</script>
+</body>
+</html>
